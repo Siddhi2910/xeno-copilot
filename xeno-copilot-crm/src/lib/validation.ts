@@ -53,7 +53,8 @@ export const CampaignLaunchSchema = z.object({
 const ChannelEnum = z.enum(['WHATSAPP', 'SMS', 'EMAIL']);
 
 export const OptOutSchema = z.object({
-  channels: z.array(ChannelEnum).min(1),
+  channel:  ChannelEnum,
+  optedOut: z.boolean(),
 });
 
 // ─── Callback delivery ────────────────────────────────────────────────────────
@@ -83,5 +84,5 @@ export type IntentExtractInput = z.infer<typeof IntentExtractSchema>;
 export type AudiencePreviewInput = z.infer<typeof AudiencePreviewSchema>;
 export type CampaignRefineInput = z.infer<typeof CampaignRefineSchema>;
 export type CampaignLaunchInput = z.infer<typeof CampaignLaunchSchema>;
-export type OptOutInput = z.infer<typeof OptOutSchema>;
+export type OptOutInput    = z.infer<typeof OptOutSchema>;
 export type DeliveryCallbackInput = z.infer<typeof DeliveryCallbackSchema>;

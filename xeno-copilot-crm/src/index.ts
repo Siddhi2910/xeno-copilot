@@ -7,7 +7,11 @@ import morgan from 'morgan';
 import { connectDB } from './config/db';
 import { authMiddleware } from './middleware/auth';
 import { errorHandler } from './middleware/errorHandler';
-import healthRouter from './routes/health.routes';
+import healthRouter    from './routes/health.routes';
+import importRouter    from './routes/import.routes';
+import customersRouter from './routes/customers.routes';
+import ordersRouter    from './routes/orders.routes';
+import segmentsRouter  from './routes/segments.routes';
 
 // ─── Env validation ───────────────────────────────────────────────────────────
 // Fail fast on startup if required variables are missing.
@@ -48,6 +52,10 @@ app.use(authMiddleware);
 // Additional routers are added in later phases.
 
 app.use('/api/v1', healthRouter);
+app.use('/api/v1/import',    importRouter);
+app.use('/api/v1/customers', customersRouter);
+app.use('/api/v1/orders',    ordersRouter);
+app.use('/api/v1/segments',  segmentsRouter);
 
 // Bare /health alias (Render health check pings this path by default)
 app.get('/health', (_req, res) => {
