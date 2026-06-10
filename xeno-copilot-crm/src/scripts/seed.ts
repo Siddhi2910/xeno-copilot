@@ -1,21 +1,35 @@
 /**
- * Raga brand seed script.
- * Creates 1000 customers, ~3000 orders, channel_stats, and 2 completed campaigns.
- * Run: npx ts-node src/scripts/seed.ts
+ * seed.ts — Raga brand demo dataset.
  *
- * DESTRUCTIVE: drops existing customers, orders, channel_stats, and campaigns
- * before inserting new data. Safe to re-run.
+ * Creates:
+ *   1 000 customers across 6 RFM-segment batches
+ *   ~2 900 orders spread realistically over time
+ *   RFM scores computed via rfm.service
+ *   6 channel_stats rows (simulated historical performance)
+ *   2 completed campaigns (Win Back + Reward Loyal)
+ *   CampaignCluster + CampaignMessage + CommunicationEvent data for campaign 1
+ *     → 20 messages (10 WHATSAPP + 10 EMAIL), full delivery-funnel simulation
+ *
+ * DESTRUCTIVE: drops customers, orders, campaigns, campaign_clusters,
+ *              campaign_messages, communication_events, channel_stats before
+ *              re-seeding. Safe to re-run.
+ *
+ * Run: npx ts-node src/scripts/seed.ts
  */
 
 import 'dotenv/config';
 import mongoose, { Types } from 'mongoose';
-import { Customer } from '../models/Customer';
-import { Order } from '../models/Order';
-import { ChannelStats } from '../models/ChannelStats';
-import { Campaign } from '../models/Campaign';
-import { computeRFM } from '../services/rfm.service';
+import { Customer }           from '../models/Customer';
+import { Order }              from '../models/Order';
+import { ChannelStats }       from '../models/ChannelStats';
+import { Campaign }           from '../models/Campaign';
+import { CampaignCluster }    from '../models/CampaignCluster';
+import { CampaignMessage }    from '../models/CampaignMessage';
+import { CommunicationEvent } from '../models/CommunicationEvent';
+import { computeRFM }         from '../services/rfm.service';
+import { sha256Hex }          from '../lib/crypto';
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Startup guard ────────────────────────────────────────────────────────────
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
@@ -29,13 +43,12 @@ function rand(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function randFloat(min: number, max: number, decimals = 0): number {
-  const v = Math.random() * (max - min) + min;
-  return decimals === 0 ? Math.round(v) : Math.round(v * 10 ** decimals) / 10 ** decimals;
+function daysAgo(n: number): Date {
+  return new Date(Date.now() - n * 86_400_000);
 }
 
-function daysAgo(n: number): Date {
-  return new Date(Date.now() - n * 86400000);
+function hoursAgo(n: number): Date {
+  return new Date(Date.now() - n * 3_600_000);
 }
 
 function randFrom<T>(arr: readonly T[]): T {
@@ -60,11 +73,11 @@ const LAST_NAMES = [
   'Chatterjee', 'Das', 'Ghosh', 'Roy', 'Kumar', 'Mukherjee',
 ];
 
-const EMAIL_DOMAINS = ['gmail.com', 'yahoo.co.in', 'outlook.com', 'hotmail.com', 'rediffmail.com'];
-const CATEGORIES    = ['kurta', 'saree', 'lehenga', 'anarkali', 'dupatta', 'salwar-kameez', 'accessories', 'jewelry', 'footwear', 'blouse'];
+const EMAIL_DOMAINS  = ['gmail.com', 'yahoo.co.in', 'outlook.com', 'hotmail.com', 'rediffmail.com'];
+const CATEGORIES     = ['kurta', 'saree', 'lehenga', 'anarkali', 'dupatta', 'salwar-kameez', 'accessories', 'jewelry', 'footwear', 'blouse'];
 const ORDER_CHANNELS = ['ONLINE', 'OFFLINE'] as const;
 
-let phoneCounter = 6000000000; // Start at +916000000000
+let phoneCounter = 6_000_000_000;
 
 function nextPhone(): string {
   phoneCounter += rand(1, 99);
@@ -74,45 +87,40 @@ function nextPhone(): string {
 function makeName(): { name: string; email: string | null } {
   const first = randFrom(FIRST_NAMES);
   const last  = randFrom(LAST_NAMES);
-  const name  = `${first} ${last}`;
-  // ~60% of customers have email
   const email = Math.random() < 0.6
     ? `${first.toLowerCase()}.${last.toLowerCase()}${rand(1, 99)}@${randFrom(EMAIL_DOMAINS)}`
     : null;
-  return { name, email };
+  return { name: `${first} ${last}`, email };
 }
 
 // ─── Order factory ────────────────────────────────────────────────────────────
 
 interface OrderSeed {
-  orderId: string;
-  customerId: Types.ObjectId;
-  customerPhone: string;
-  amount: number;
+  orderId:         string;
+  customerId:      Types.ObjectId;
+  customerPhone:   string;
+  amount:          number;
   productCategory: string | null;
-  orderDate: Date;
-  channel: 'ONLINE' | 'OFFLINE';
+  orderDate:       Date;
+  channel:         'ONLINE' | 'OFFLINE';
   discountApplied: boolean;
 }
 
-let orderCounter = 100000;
+let orderCounter = 100_000;
 
 function makeOrders(
-  customerId: Types.ObjectId,
-  phone: string,
-  count: number,
+  customerId:       Types.ObjectId,
+  phone:            string,
+  count:            number,
   lastOrderDaysAgo: number,
-  earliestDaysAgo: number,
-  minAmount: number,
-  maxAmount: number,
+  earliestDaysAgo:  number,
+  minAmount:        number,
+  maxAmount:        number,
 ): OrderSeed[] {
   const orders: OrderSeed[] = [];
-
-  // Place the most recent order at lastOrderDaysAgo; spread others backwards
   const spread = earliestDaysAgo - lastOrderDaysAgo;
 
   for (let i = 0; i < count; i++) {
-    // Most recent first, spread backwards
     const offset = i === 0
       ? lastOrderDaysAgo + rand(0, 5)
       : lastOrderDaysAgo + rand(10, spread);
@@ -132,38 +140,249 @@ function makeOrders(
   return orders;
 }
 
-// ─── Batch definitions ────────────────────────────────────────────────────────
-// Designed so after quintile-based RFM computation, we get ~6 distinct segments.
+// ─── Segment-batch definitions ────────────────────────────────────────────────
+// Designed so quintile-based RFM yields all 6 segments with realistic counts.
 //
-// Batch A (100): CHAMPIONS target    — very recent, high frequency, high spend
-// Batch B (150): PROMISING target    — recent, medium freq, medium spend
-// Batch C (80):  AT_RISK target      — medium recency, high freq, high spend
-// Batch D (70):  DORMANT_VIP target  — dormant, medium freq, high spend
-// Batch E (280): LAPSED target       — very dormant, low freq, low spend
-// Batch F (320): GENERAL target      — medium recency, medium freq, medium spend
+//  A (100) CHAMPIONS         — very recent, high freq, high spend
+//  B (150) PROMISING         — recent, medium freq, medium spend
+//  C  (80) AT_RISK_LOYALISTS — medium recency, high freq, high spend
+//  D  (70) DORMANT_VIPS      — dormant, medium freq, high spend
+//  E (280) LAPSED_LOW_VALUE  — very dormant, low freq, low spend
+//  F (320) GENERAL           — medium recency, medium freq, medium spend
 
 interface BatchConfig {
-  count: number;
-  orderCount: [number, number];     // [min, max] orders per customer
+  count:            number;
+  orderCount:       [number, number];
   lastOrderDaysAgo: [number, number];
-  earliestDaysAgo: number;
-  amountRange: [number, number];
+  earliestDaysAgo:  number;
+  amountRange:      [number, number];
 }
 
 const BATCHES: BatchConfig[] = [
-  // A: CHAMPIONS
-  { count: 100, orderCount: [5, 8],  lastOrderDaysAgo: [1, 20],   earliestDaysAgo: 180,  amountRange: [4000, 12000] },
-  // B: PROMISING
-  { count: 150, orderCount: [2, 4],  lastOrderDaysAgo: [20, 45],  earliestDaysAgo: 365,  amountRange: [2000, 7000]  },
-  // C: AT_RISK_LOYALISTS
-  { count: 80,  orderCount: [5, 9],  lastOrderDaysAgo: [70, 100], earliestDaysAgo: 540,  amountRange: [3000, 10000] },
-  // D: DORMANT_VIPS
-  { count: 70,  orderCount: [3, 6],  lastOrderDaysAgo: [130, 175], earliestDaysAgo: 730, amountRange: [4000, 15000] },
-  // E: LAPSED_LOW_VALUE
-  { count: 280, orderCount: [1, 2],  lastOrderDaysAgo: [200, 400], earliestDaysAgo: 730, amountRange: [500, 2500]   },
-  // F: GENERAL
-  { count: 320, orderCount: [2, 4],  lastOrderDaysAgo: [50, 70],  earliestDaysAgo: 365,  amountRange: [1000, 4500]  },
+  { count: 100, orderCount: [5, 8], lastOrderDaysAgo: [1,   20],  earliestDaysAgo: 180, amountRange: [4000, 12000] },
+  { count: 150, orderCount: [2, 4], lastOrderDaysAgo: [20,  45],  earliestDaysAgo: 365, amountRange: [2000,  7000] },
+  { count: 80,  orderCount: [5, 9], lastOrderDaysAgo: [70, 100],  earliestDaysAgo: 540, amountRange: [3000, 10000] },
+  { count: 70,  orderCount: [3, 6], lastOrderDaysAgo: [130, 175], earliestDaysAgo: 730, amountRange: [4000, 15000] },
+  { count: 280, orderCount: [1, 2], lastOrderDaysAgo: [200, 400], earliestDaysAgo: 730, amountRange: [500,   2500] },
+  { count: 320, orderCount: [2, 4], lastOrderDaysAgo: [50,  70],  earliestDaysAgo: 365, amountRange: [1000,  4500] },
 ];
+
+// ─── Delivery-funnel simulation for campaign 1 ────────────────────────────────
+//
+// Creates CampaignCluster, CampaignMessage, and CommunicationEvent documents
+// for the seeded Win-Back campaign, so getCampaignStats() returns real numbers.
+//
+// Funnel for each cluster (10 messages each):
+//   DORMANT_VIPS  (WHATSAPP):  10 SENT, 9 DELIVERED, 7 OPENED, 4 CLICKED, 2 CONVERTED
+//   LAPSED_LOW_VALUE (EMAIL):  10 SENT, 9 DELIVERED, 5 OPENED, 2 CLICKED, 1 CONVERTED
+
+// Which events a message at each status level generates
+type FunnelTier = {
+  finalStatus: 'SENT' | 'DELIVERED' | 'OPENED' | 'CLICKED' | 'CONVERTED';
+  events:      Array<'SENT' | 'DELIVERED' | 'OPENED' | 'CLICKED' | 'CONVERTED'>;
+};
+
+const WA_TIERS: FunnelTier[] = [
+  { finalStatus: 'CONVERTED', events: ['SENT', 'DELIVERED', 'OPENED', 'CLICKED', 'CONVERTED'] },
+  { finalStatus: 'CONVERTED', events: ['SENT', 'DELIVERED', 'OPENED', 'CLICKED', 'CONVERTED'] },
+  { finalStatus: 'CLICKED',   events: ['SENT', 'DELIVERED', 'OPENED', 'CLICKED'] },
+  { finalStatus: 'CLICKED',   events: ['SENT', 'DELIVERED', 'OPENED', 'CLICKED'] },
+  { finalStatus: 'OPENED',    events: ['SENT', 'DELIVERED', 'OPENED'] },
+  { finalStatus: 'OPENED',    events: ['SENT', 'DELIVERED', 'OPENED'] },
+  { finalStatus: 'OPENED',    events: ['SENT', 'DELIVERED', 'OPENED'] },
+  { finalStatus: 'DELIVERED', events: ['SENT', 'DELIVERED'] },
+  { finalStatus: 'DELIVERED', events: ['SENT', 'DELIVERED'] },
+  { finalStatus: 'SENT',      events: ['SENT'] },
+];
+
+const EMAIL_TIERS: FunnelTier[] = [
+  { finalStatus: 'CONVERTED', events: ['SENT', 'DELIVERED', 'OPENED', 'CLICKED', 'CONVERTED'] },
+  { finalStatus: 'CLICKED',   events: ['SENT', 'DELIVERED', 'OPENED', 'CLICKED'] },
+  { finalStatus: 'OPENED',    events: ['SENT', 'DELIVERED', 'OPENED'] },
+  { finalStatus: 'OPENED',    events: ['SENT', 'DELIVERED', 'OPENED'] },
+  { finalStatus: 'OPENED',    events: ['SENT', 'DELIVERED', 'OPENED'] },
+  { finalStatus: 'DELIVERED', events: ['SENT', 'DELIVERED'] },
+  { finalStatus: 'DELIVERED', events: ['SENT', 'DELIVERED'] },
+  { finalStatus: 'DELIVERED', events: ['SENT', 'DELIVERED'] },
+  { finalStatus: 'DELIVERED', events: ['SENT', 'DELIVERED'] },
+  { finalStatus: 'SENT',      events: ['SENT'] },
+];
+
+const STATUS_TIMESTAMP_FIELD: Record<string, string> = {
+  SENT:      'sentAt',
+  DELIVERED: 'deliveredAt',
+  OPENED:    'openedAt',
+  CLICKED:   'clickedAt',
+  CONVERTED: 'convertedAt',
+};
+
+interface CustomerLite {
+  _id:   Types.ObjectId;
+  phone: string;
+  email: string | null;
+  name:  string;
+}
+
+async function seedCampaignDeliveryData(campaign1Id: Types.ObjectId): Promise<void> {
+  // Fetch 10 customers from each target segment (they exist after computeRFM)
+  const dormantVips = await Customer.find(
+    { rfmSegment: 'DORMANT_VIPS' },
+    { _id: 1, phone: 1, email: 1, name: 1 },
+  ).limit(10).lean() as CustomerLite[];
+
+  const lapsedLow = await Customer.find(
+    { rfmSegment: 'LAPSED_LOW_VALUE' },
+    { _id: 1, phone: 1, email: 1, name: 1 },
+  ).limit(10).lean() as CustomerLite[];
+
+  if (dormantVips.length < 10 || lapsedLow.length < 10) {
+    console.warn('[seed] Warning: not enough customers for delivery simulation — skipping.');
+    return;
+  }
+
+  // Create 2 CampaignClusters ────────────────────────────────────────────────
+  const cluster1Id = new Types.ObjectId();
+  const cluster2Id = new Types.ObjectId();
+
+  const WA_STATS  = { queued: 10, sent: 10, delivered: 9, failed: 0, opened: 7, clicked: 4, converted: 2 };
+  const EM_STATS  = { queued: 10, sent: 10, delivered: 9, failed: 0, opened: 5, clicked: 2, converted: 1 };
+
+  await CampaignCluster.insertMany([
+    {
+      _id:             cluster1Id,
+      campaignId:      campaign1Id,
+      clusterLabel:    'DORMANT_VIPS',
+      clusterDescription: 'High-value customers who drifted away — strong win-back potential',
+      rfmPatternDescription: 'R≤2, F≥3, M≥3 — lapsed but loyal historically',
+      memberCount:     10,
+      assignedChannel: 'WHATSAPP',
+      channelConfidence: 'HIGH',
+      message: {
+        subject:   null,
+        body:      'Hi {name}, we miss you! Come back and discover our new collection. Shop now: {ctaUrl}',
+        ctaText:   'Shop Now',
+        ctaUrl:    'https://raga.example.com/win-back',
+        rationale: 'WhatsApp preferred for high-engagement dormant VIPs',
+      },
+      stats:     WA_STATS,
+      createdAt: daysAgo(175),
+    },
+    {
+      _id:             cluster2Id,
+      campaignId:      campaign1Id,
+      clusterLabel:    'LAPSED_LOW_VALUE',
+      clusterDescription: 'Occasional buyers who last shopped over 6 months ago',
+      rfmPatternDescription: 'R≤2, F≤2 — infrequent and dormant',
+      memberCount:     10,
+      assignedChannel: 'EMAIL',
+      channelConfidence: 'MEDIUM',
+      message: {
+        subject:   'We have a special offer waiting for you',
+        body:      'Dear {name}, it\'s been a while! We have curated a special collection just for you. Click here: {ctaUrl}',
+        ctaText:   'See Collection',
+        ctaUrl:    'https://raga.example.com/win-back-email',
+        rationale: 'Email used as secondary channel for lower-value segment',
+      },
+      stats:     EM_STATS,
+      createdAt: daysAgo(175),
+    },
+  ]);
+
+  // Build CampaignMessage + CommunicationEvent docs ──────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messageDocs:  any[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const eventDocs:    any[] = [];
+
+  const buildClusterMessages = (
+    customers:  CustomerLite[],
+    clusterId:  Types.ObjectId,
+    channel:    'WHATSAPP' | 'EMAIL',
+    tiers:      FunnelTier[],
+    baseOffset: number,  // days ago for base timestamp
+  ) => {
+    customers.forEach((customer, i) => {
+      const tier      = tiers[i];
+      const messageId = new Types.ObjectId();
+      const recipient = channel === 'EMAIL'
+        ? (customer.email ?? customer.phone)
+        : customer.phone;
+
+      // Timestamps spread over the campaign window (daysAgo(baseOffset) → daysAgo(baseOffset-14))
+      const sentTime      = daysAgo(baseOffset - rand(0, 3));
+      const deliveredTime = new Date(sentTime.getTime() + rand(1, 30) * 60_000);     // 1–30 min after sent
+      const openedTime    = new Date(deliveredTime.getTime() + rand(10, 120) * 60_000); // 10–120 min after delivered
+      const clickedTime   = new Date(openedTime.getTime() + rand(1, 20) * 60_000);
+      const convertedTime = new Date(clickedTime.getTime() + rand(5, 60) * 60_000);
+
+      const tsMap: Record<string, Date> = {
+        SENT:      sentTime,
+        DELIVERED: deliveredTime,
+        OPENED:    openedTime,
+        CLICKED:   clickedTime,
+        CONVERTED: convertedTime,
+      };
+
+      // Build CampaignMessage with final status + all reached timestamps
+      const msgDoc: Record<string, unknown> = {
+        _id:               messageId,
+        campaignId:        campaign1Id,
+        clusterId,
+        customerId:        customer._id,
+        channel,
+        recipient,
+        clickTrackingPath: `/api/v1/track/click/${messageId.toHexString()}`,
+        ctaUrl:            channel === 'EMAIL'
+          ? 'https://raga.example.com/win-back-email'
+          : 'https://raga.example.com/win-back',
+        status:            tier.finalStatus,
+        queuedAt:          daysAgo(baseOffset + 1),
+        sentAt:            null,
+        deliveredAt:       null,
+        openedAt:          null,
+        clickedAt:         null,
+        convertedAt:       null,
+        failedAt:          null,
+        failureReason:     null,
+        createdAt:         daysAgo(baseOffset + 1),
+      };
+
+      for (const ev of tier.events) {
+        const field = STATUS_TIMESTAMP_FIELD[ev];
+        if (field) msgDoc[field] = tsMap[ev];
+      }
+
+      messageDocs.push(msgDoc);
+
+      // Build one CommunicationEvent per funnel step reached
+      for (const ev of tier.events) {
+        eventDocs.push({
+          messageId,
+          campaignId:        campaign1Id,
+          customerId:        customer._id,
+          clusterId,
+          channel,
+          eventType:         ev,
+          eventTimestamp:    tsMap[ev],
+          receivedAt:        new Date(tsMap[ev].getTime() + rand(100, 500)),
+          providerMessageId: `MOCK-${messageId.toHexString().slice(0, 8)}-${ev}`,
+          metadata:          null,
+          idempotencyKey:    sha256Hex(`${messageId.toHexString()}:${ev}`),
+        });
+      }
+    });
+  };
+
+  buildClusterMessages(dormantVips, cluster1Id, 'WHATSAPP', WA_TIERS,    173);
+  buildClusterMessages(lapsedLow,   cluster2Id, 'EMAIL',    EMAIL_TIERS, 170);
+
+  // Insert in batches
+  await CampaignMessage.insertMany(messageDocs, { ordered: false });
+  console.log(`[seed] Inserted ${messageDocs.length} campaign_messages for campaign 1.`);
+
+  await CommunicationEvent.insertMany(eventDocs, { ordered: false });
+  console.log(`[seed] Inserted ${eventDocs.length} communication_events for campaign 1.`);
+}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -171,17 +390,20 @@ async function seed(): Promise<void> {
   await mongoose.connect(MONGODB_URI!, { maxPoolSize: 5 });
   console.log('[seed] Connected to MongoDB.');
 
-  // Clear existing data
+  // Clear all relevant collections ───────────────────────────────────────────
   console.log('[seed] Clearing existing seed data...');
   await Promise.all([
     Customer.deleteMany({}),
     Order.deleteMany({}),
     ChannelStats.deleteMany({}),
     Campaign.deleteMany({}),
+    CampaignCluster.deleteMany({}),
+    CampaignMessage.deleteMany({}),
+    CommunicationEvent.deleteMany({}),
   ]);
   console.log('[seed] Collections cleared.');
 
-  // Build customers and orders
+  // Build customers and orders ────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allCustomers: any[] = [];
   const allOrders:    OrderSeed[] = [];
@@ -190,7 +412,9 @@ async function seed(): Promise<void> {
     for (let i = 0; i < batch.count; i++) {
       const phone = nextPhone();
       const { name, email } = makeName();
-      const tags: string[] = Math.random() < 0.3 ? [randFrom(['vip', 'festive-buyer', 'new', 'loyal'])] : [];
+      const tags: string[] = Math.random() < 0.3
+        ? [randFrom(['vip', 'festive-buyer', 'new', 'loyal'])]
+        : [];
 
       const customerId = new Types.ObjectId();
       allCustomers.push({
@@ -215,16 +439,10 @@ async function seed(): Promise<void> {
 
       const orderCount  = rand(batch.orderCount[0], batch.orderCount[1]);
       const lastDaysAgo = rand(batch.lastOrderDaysAgo[0], batch.lastOrderDaysAgo[1]);
-      const orders = makeOrders(
-        customerId,
-        phone,
-        orderCount,
-        lastDaysAgo,
-        batch.earliestDaysAgo,
-        batch.amountRange[0],
-        batch.amountRange[1],
-      );
-      allOrders.push(...orders);
+      allOrders.push(...makeOrders(
+        customerId, phone, orderCount, lastDaysAgo,
+        batch.earliestDaysAgo, batch.amountRange[0], batch.amountRange[1],
+      ));
     }
   }
 
@@ -232,59 +450,48 @@ async function seed(): Promise<void> {
   console.log(`[seed] Inserting ${allCustomers.length} customers...`);
   await Customer.insertMany(allCustomers, { ordered: false });
 
-  // Insert orders in batches of 500
+  // Insert orders in 500-row batches
   console.log(`[seed] Inserting ${allOrders.length} orders...`);
   for (let i = 0; i < allOrders.length; i += 500) {
     await Order.insertMany(allOrders.slice(i, i + 500), { ordered: false });
   }
 
-  // Compute RFM
+  // Compute RFM ───────────────────────────────────────────────────────────────
   console.log('[seed] Computing RFM scores...');
   const { updated, reset } = await computeRFM();
   console.log(`[seed] RFM complete — updated: ${updated}, reset: ${reset}`);
 
-  // ─── Seed channel_stats (simulates 2 prior completed campaigns) ───────────
-
+  // Seed channel_stats (6 rows, 2 prior completed campaigns) ─────────────────
   const channelStatsData = [
-    // WIN_BACK campaigns (strong WhatsApp, weaker email)
-    { channel: 'WHATSAPP', campaignType: 'WIN_BACK', totalSent: 1240, totalDelivered: 1187, totalOpened: 821, totalClicked: 293, totalConverted: 74, campaignCount: 3 },
-    { channel: 'EMAIL',    campaignType: 'WIN_BACK', totalSent: 430,  totalDelivered: 419,  totalOpened: 89,  totalClicked: 21,  totalConverted: 9,  campaignCount: 2 },
-    // REWARD_LOYAL campaigns
-    { channel: 'WHATSAPP', campaignType: 'REWARD_LOYAL', totalSent: 580, totalDelivered: 563, totalOpened: 410, totalClicked: 198, totalConverted: 52, campaignCount: 2 },
-    { channel: 'EMAIL',    campaignType: 'REWARD_LOYAL', totalSent: 210, totalDelivered: 205, totalOpened: 68,  totalClicked: 29,  totalConverted: 12, campaignCount: 2 },
-    // UPSELL campaigns
-    { channel: 'WHATSAPP', campaignType: 'UPSELL', totalSent: 380, totalDelivered: 367, totalOpened: 241, totalClicked: 89, totalConverted: 28, campaignCount: 1 },
-    { channel: 'SMS',      campaignType: 'WIN_BACK', totalSent: 310, totalDelivered: 281, totalOpened: 0, totalClicked: 42, totalConverted: 18, campaignCount: 1 },
+    { channel: 'WHATSAPP', campaignType: 'WIN_BACK',      totalSent: 1240, totalDelivered: 1187, totalOpened: 821,  totalClicked: 293, totalConverted: 74,  campaignCount: 3 },
+    { channel: 'EMAIL',    campaignType: 'WIN_BACK',      totalSent: 430,  totalDelivered: 419,  totalOpened: 89,   totalClicked: 21,  totalConverted: 9,   campaignCount: 2 },
+    { channel: 'WHATSAPP', campaignType: 'REWARD_LOYAL',  totalSent: 580,  totalDelivered: 563,  totalOpened: 410,  totalClicked: 198, totalConverted: 52,  campaignCount: 2 },
+    { channel: 'EMAIL',    campaignType: 'REWARD_LOYAL',  totalSent: 210,  totalDelivered: 205,  totalOpened: 68,   totalClicked: 29,  totalConverted: 12,  campaignCount: 2 },
+    { channel: 'WHATSAPP', campaignType: 'UPSELL',        totalSent: 380,  totalDelivered: 367,  totalOpened: 241,  totalClicked: 89,  totalConverted: 28,  campaignCount: 1 },
+    { channel: 'SMS',      campaignType: 'WIN_BACK',      totalSent: 310,  totalDelivered: 281,  totalOpened: 0,    totalClicked: 42,  totalConverted: 18,  campaignCount: 1 },
   ];
 
-  const channelStatsDocs = channelStatsData.map((s) => {
-    const deliveryRate   = s.totalSent     > 0 ? s.totalDelivered / s.totalSent     : 0;
-    const openRate       = s.totalDelivered > 0 ? s.totalOpened   / s.totalDelivered : 0;
-    const clickRate      = s.totalOpened   > 0 ? s.totalClicked   / s.totalOpened   : 0;
-    const conversionRate = s.totalSent     > 0 ? s.totalConverted / s.totalSent     : 0;
-    return {
-      brandId:        null,
-      channel:        s.channel,
-      campaignType:   s.campaignType,
-      totalSent:      s.totalSent,
-      totalDelivered: s.totalDelivered,
-      totalOpened:    s.totalOpened,
-      totalClicked:   s.totalClicked,
-      totalConverted: s.totalConverted,
-      deliveryRate:   Math.round(deliveryRate   * 1000) / 1000,
-      openRate:       Math.round(openRate       * 1000) / 1000,
-      clickRate:      Math.round(clickRate      * 1000) / 1000,
-      conversionRate: Math.round(conversionRate * 1000) / 1000,
-      campaignCount:  s.campaignCount,
-      lastUpdatedAt:  new Date(),
-    };
-  });
+  const channelStatsDocs = channelStatsData.map((s) => ({
+    brandId:        null,
+    channel:        s.channel,
+    campaignType:   s.campaignType,
+    totalSent:      s.totalSent,
+    totalDelivered: s.totalDelivered,
+    totalOpened:    s.totalOpened,
+    totalClicked:   s.totalClicked,
+    totalConverted: s.totalConverted,
+    deliveryRate:   s.totalSent     > 0 ? Math.round(s.totalDelivered / s.totalSent     * 1000) / 1000 : 0,
+    openRate:       s.totalDelivered > 0 ? Math.round(s.totalOpened   / s.totalDelivered * 1000) / 1000 : 0,
+    clickRate:      s.totalOpened   > 0 ? Math.round(s.totalClicked   / s.totalOpened   * 1000) / 1000 : 0,
+    conversionRate: s.totalSent     > 0 ? Math.round(s.totalConverted / s.totalSent     * 1000) / 1000 : 0,
+    campaignCount:  s.campaignCount,
+    lastUpdatedAt:  new Date(),
+  }));
 
   await ChannelStats.insertMany(channelStatsDocs);
   console.log(`[seed] Inserted ${channelStatsDocs.length} channel_stats documents.`);
 
-  // ─── Seed 2 completed campaigns ───────────────────────────────────────────
-
+  // Seed 2 completed campaigns ───────────────────────────────────────────────
   const campaign1Id = new Types.ObjectId();
   const campaign2Id = new Types.ObjectId();
 
@@ -306,7 +513,7 @@ async function seed(): Promise<void> {
         count: 447, medianAOV: 2800,
         channelMix: { WHATSAPP: 312, EMAIL: 135 }, savedAt: daysAgo(175),
       },
-      totalRecipients:  440,
+      totalRecipients:  20,    // matches the 20 CampaignMessages we create below
       scheduledAt:      null,
       launchedAt:       daysAgo(175),
       completedAt:      daysAgo(161),
@@ -315,10 +522,10 @@ async function seed(): Promise<void> {
         min: 123200, max: 184800, conversionRate: 0.05, source: 'INDUSTRY_BENCHMARK',
       },
       aiReport: `## Campaign Performance Summary\n\n` +
-        `The Win Back campaign (Dec 2025) reached **440 dormant customers** across WhatsApp and Email. ` +
-        `WhatsApp achieved a **6.0% conversion rate** versus Email at **2.1%**. ` +
-        `Dormant VIPs drove 71% of all conversions despite being only 29% of the audience. ` +
-        `**Next step:** Prioritise WhatsApp for future win-back campaigns targeting the ₹3000+ AOV segment.`,
+        `The Win Back campaign (Dec 2025) reached **20 dormant customers** across WhatsApp and Email. ` +
+        `WhatsApp achieved a **20% conversion rate** versus Email at **10%**. ` +
+        `Dormant VIPs drove 67% of all conversions despite being 50% of the audience. ` +
+        `**Next step:** Prioritise WhatsApp for future win-back campaigns targeting the ₹4000+ AOV segment.`,
       aiReportGeneratedAt: daysAgo(159),
       createdAt:        daysAgo(176),
       draftSavedAt:     daysAgo(175),
@@ -360,24 +567,38 @@ async function seed(): Promise<void> {
   ]);
   console.log('[seed] Inserted 2 completed campaigns.');
 
-  // ─── Print segment distribution ───────────────────────────────────────────
+  // Seed delivery funnel data for campaign 1 ─────────────────────────────────
+  console.log('[seed] Seeding delivery events for campaign 1...');
+  await seedCampaignDeliveryData(campaign1Id);
 
-  const distribution = await Customer.aggregate([
-    { $match: { rfmSegment: { $ne: null } } },
-    { $group: { _id: '$rfmSegment', count: { $sum: 1 } } },
-    { $sort: { count: -1 } },
-  ]);
+  // ─── Summary ──────────────────────────────────────────────────────────────
 
-  const noSegment = await Customer.countDocuments({ rfmSegment: null });
-  const total     = await Customer.estimatedDocumentCount();
-  const orderCount = await Order.estimatedDocumentCount();
+  const [distribution, noSegment, totalCustomers, totalOrders, totalMessages, totalEvents] =
+    await Promise.all([
+      Customer.aggregate([
+        { $match: { rfmSegment: { $ne: null } } },
+        { $group: { _id: '$rfmSegment', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]),
+      Customer.countDocuments({ rfmSegment: null }),
+      Customer.estimatedDocumentCount(),
+      Order.estimatedDocumentCount(),
+      CampaignMessage.estimatedDocumentCount(),
+      CommunicationEvent.estimatedDocumentCount(),
+    ]);
 
-  console.log('\n[seed] ─── Seed complete ───');
-  console.log(`  Customers: ${total}`);
-  console.log(`  Orders:    ${orderCount}`);
+  // Unused variable suppressed — hoursAgo used only in this file
+  void hoursAgo;
+
+  console.log('\n[seed] ─── Seed complete ───────────────────────────────────────');
+  console.log(`  Customers:            ${totalCustomers}`);
+  console.log(`  Orders:               ${totalOrders}`);
+  console.log(`  CampaignMessages:     ${totalMessages}`);
+  console.log(`  CommunicationEvents:  ${totalEvents}`);
   console.log('  RFM segment distribution:');
-  distribution.forEach((s) => console.log(`    ${s._id.padEnd(20)} ${s.count}`));
-  if (noSegment > 0) console.log(`    (no segment)         ${noSegment}`);
+  (distribution as Array<{ _id: string; count: number }>)
+    .forEach((s) => console.log(`    ${s._id.padEnd(22)} ${s.count}`));
+  if (noSegment > 0) console.log(`    (no segment)           ${noSegment}`);
   console.log('');
 
   await mongoose.disconnect();
