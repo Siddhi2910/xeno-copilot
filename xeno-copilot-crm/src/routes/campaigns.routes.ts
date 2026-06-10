@@ -1,8 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { Types } from 'mongoose';
 import { CAMPAIGN_STATUSES } from '../models/Campaign';
+import { Campaign } from '../models/Campaign';
+import { CampaignMessage } from '../models/CampaignMessage';
+import { Customer } from '../models/Customer';
 import { INTENT_TYPE_SET } from '../services/audience.service';
 import { AppError } from '../middleware/errorHandler';
-import { AudiencePreviewSchema } from '../lib/validation';
+import { AudiencePreviewSchema, CampaignLaunchSchema } from '../lib/validation';
+import { encodeCursor, decodeCursor } from '../lib/pagination';
+import { launchCampaign } from '../services/dispatch.service';
 import {
   previewAudience,
   createDraftCampaign,
@@ -150,6 +156,141 @@ router.get(
       next(err);
     }
   }
+);
+
+// ─── POST /api/v1/campaigns/:campaignId/ready ─────────────────────────────────
+// Transition DRAFT → READY_FOR_REVIEW. Required before launch.
+
+router.post(
+  '/:campaignId/ready',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { campaignId } = req.params;
+      if (!Types.ObjectId.isValid(campaignId)) {
+        throw new AppError(404, 'NOT_FOUND', `Campaign ${campaignId} not found.`);
+      }
+
+      const campaign = await Campaign.findOneAndUpdate(
+        { _id: new Types.ObjectId(campaignId), status: 'DRAFT' },
+        { $set: { status: 'READY_FOR_REVIEW' } },
+        { new: true },
+      ).lean();
+
+      if (!campaign) {
+        const existing = await Campaign.findById(campaignId, { status: 1 }).lean();
+        if (!existing) {
+          throw new AppError(404, 'NOT_FOUND', `Campaign ${campaignId} not found.`);
+        }
+        throw new AppError(
+          422,
+          'INVALID_TRANSITION',
+          `Campaign must be in DRAFT status to mark as ready. Current status: ${existing.status}.`,
+        );
+      }
+
+      res.json({ data: { campaignId, status: 'READY_FOR_REVIEW' } });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── POST /api/v1/campaigns/:campaignId/launch ────────────────────────────────
+// Launch a READY_FOR_REVIEW campaign — fan-out to DispatchJob documents.
+
+router.post(
+  '/:campaignId/launch',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { campaignId } = req.params;
+      if (!Types.ObjectId.isValid(campaignId)) {
+        throw new AppError(404, 'NOT_FOUND', `Campaign ${campaignId} not found.`);
+      }
+
+      const parsed = CampaignLaunchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw new AppError(400, 'VALIDATION_ERROR', issue.message, issue.path[0]?.toString());
+      }
+
+      const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null;
+
+      const result = await launchCampaign(campaignId, scheduledAt);
+
+      res.status(200).json({ data: result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── GET /api/v1/campaigns/:campaignId/messages ───────────────────────────────
+// List dispatched messages for a campaign. Cursor pagination, ascending _id order.
+// Joins Customer for name + phone.
+// Must be defined before /:campaignId.
+
+router.get(
+  '/:campaignId/messages',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { campaignId } = req.params;
+      if (!Types.ObjectId.isValid(campaignId)) {
+        throw new AppError(404, 'NOT_FOUND', `Campaign ${campaignId} not found.`);
+      }
+
+      const limit  = Math.min(parseInt(String(req.query.limit ?? '50'), 10) || 50, 200);
+      const cursor = req.query.cursor as string | undefined;
+
+      const campaignObjId = new Types.ObjectId(campaignId);
+
+      // Build match stage
+      const match: Record<string, unknown> = { campaignId: campaignObjId };
+      if (cursor) {
+        try {
+          match['_id'] = { $gt: new Types.ObjectId(decodeCursor(cursor)) };
+        } catch {
+          throw new AppError(400, 'VALIDATION_ERROR', 'Invalid cursor.', 'cursor');
+        }
+      }
+
+      // Aggregate: match → sort asc → limit+1 → lookup customer
+      const docs = await CampaignMessage.aggregate([
+        { $match: match },
+        { $sort: { _id: 1 } },
+        { $limit: limit + 1 },
+        {
+          $lookup: {
+            from:         Customer.collection.collectionName,
+            localField:   'customerId',
+            foreignField: '_id',
+            as:           '_customer',
+            pipeline:     [{ $project: { name: 1, phone: 1 } }],
+          },
+        },
+        {
+          $addFields: {
+            customerName:  { $ifNull: [{ $arrayElemAt: ['$_customer.name', 0] }, null] },
+            customerPhone: { $ifNull: [{ $arrayElemAt: ['$_customer.phone', 0] }, null] },
+          },
+        },
+        { $project: { _customer: 0 } },
+      ]);
+
+      const hasMore = docs.length > limit;
+      if (hasMore) docs.pop();
+
+      const nextCursor = hasMore && docs.length > 0
+        ? encodeCursor((docs[docs.length - 1]._id as Types.ObjectId).toHexString())
+        : null;
+
+      res.json({
+        data:       docs,
+        pagination: { hasMore, nextCursor },
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
 );
 
 export default router;

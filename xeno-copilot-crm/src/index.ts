@@ -12,8 +12,9 @@ import importRouter    from './routes/import.routes';
 import customersRouter from './routes/customers.routes';
 import ordersRouter    from './routes/orders.routes';
 import segmentsRouter  from './routes/segments.routes';
-import campaignsRouter from './routes/campaigns.routes';
-import aiRouter        from './routes/ai.routes';
+import campaignsRouter  from './routes/campaigns.routes';
+import aiRouter         from './routes/ai.routes';
+import callbacksRouter  from './routes/callbacks.routes';
 
 // ─── Env validation ───────────────────────────────────────────────────────────
 // Fail fast on startup if required variables are missing.
@@ -44,7 +45,14 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // Stash raw body on req so the callback handler can verify HMAC signatures.
+  // The Channel Service signs the raw JSON bytes; parsing would alter whitespace.
+  verify: (_req, _res, buf) => {
+    (_req as unknown as { rawBody: string }).rawBody = buf.toString('utf8');
+  },
+}));
 
 // Global auth guard — skips /health, /track/click/*, and /callbacks/delivery
 app.use(authMiddleware);
@@ -58,8 +66,9 @@ app.use('/api/v1/import',    importRouter);
 app.use('/api/v1/customers', customersRouter);
 app.use('/api/v1/orders',    ordersRouter);
 app.use('/api/v1/segments',  segmentsRouter);
-app.use('/api/v1/campaigns', campaignsRouter);
-app.use('/api/v1/ai',        aiRouter);
+app.use('/api/v1/campaigns',  campaignsRouter);
+app.use('/api/v1/ai',         aiRouter);
+app.use('/api/v1/callbacks',  callbacksRouter);
 
 // Bare /health alias (Render health check pings this path by default)
 app.get('/health', (_req, res) => {
