@@ -180,19 +180,19 @@ async function main(): Promise<void> {
   });
 
   await runCheck('CampaignCluster docs exist for campaign 1', async () => {
-    const completedCampaign = await Campaign.findOne({ status: 'COMPLETED' }).lean();
-    assert(completedCampaign !== null, 'No completed campaign found');
-    const clusterCount = await CampaignCluster.countDocuments({
-      campaignId: completedCampaign!._id,
-    });
+    // Use the Win Back campaign by name — not findOne({ status: 'COMPLETED' }) which
+    // could non-deterministically return campaign 2 (Reward Loyal) that has no clusters.
+    const campaign1 = await Campaign.findOne({ name: /Win Back/ }).lean();
+    assert(campaign1 !== null, 'Win Back campaign not found');
+    const clusterCount = await CampaignCluster.countDocuments({ campaignId: campaign1!._id });
     assert(clusterCount >= 1, `Expected ≥ 1 cluster for campaign 1, got ${clusterCount}`);
   });
 
   await runCheck('CampaignMessage docs exist for campaign 1', async () => {
-    const completedCampaign = await Campaign.findOne({ status: 'COMPLETED' }).lean();
-    const msgCount = await CampaignMessage.countDocuments({
-      campaignId: completedCampaign!._id,
-    });
+    // Same deterministic lookup — avoids flaky findOne returning the wrong campaign.
+    const campaign1 = await Campaign.findOne({ name: /Win Back/ }).lean();
+    assert(campaign1 !== null, 'Win Back campaign not found');
+    const msgCount = await CampaignMessage.countDocuments({ campaignId: campaign1!._id });
     assert(msgCount >= 1, `Expected ≥ 1 message for campaign 1, got ${msgCount}`);
   });
 
@@ -363,14 +363,17 @@ async function main(): Promise<void> {
   // ── Section 5: Callback flow ───────────────────────────────────────────────
   console.log('\n[smoke] ── Section 5: Callback flow ───────────────────────────');
 
-  // Pick the first message for detailed callback tests
+  // Pick the first two messages — msg1 for the happy-path funnel, msg2 for FAILED tests
   let msg1Id = '';
+  let msg2Id = '';
 
-  await runCheck('Resolve first test message', async () => {
+  await runCheck('Resolve first two test messages', async () => {
     assert(testCampaignId !== null, 'testCampaignId not set');
-    const msg = await CampaignMessage.findOne({ campaignId: testCampaignId }).lean();
-    assert(msg !== null, 'No messages found for test campaign');
-    msg1Id = msg!._id.toHexString();
+    const msgs = await CampaignMessage.find({ campaignId: testCampaignId })
+      .sort({ _id: 1 }).limit(2).lean();
+    assert(msgs.length >= 2, `Expected ≥ 2 messages, got ${msgs.length}`);
+    msg1Id = msgs[0]._id.toHexString();
+    msg2Id = msgs[1]._id.toHexString();
   });
 
   await runCheck('SENT callback accepted with correct HMAC', async () => {
@@ -496,9 +499,12 @@ async function main(): Promise<void> {
   });
 
   await runCheck('FAILED callbacks are non-idempotent (two accepted)', async () => {
-    assert(!!hmacSecret && !!msg1Id, 'Prerequisites not met');
+    // Use msg2 — it has never received a callback, so it is in QUEUED state.
+    // Using msg1 (OPENED) would silently regress its status to FAILED because
+    // callback.service.ts uses { failedAt: null } with no rank check for FAILED.
+    assert(!!hmacSecret && !!msg2Id, 'Prerequisites not met');
     const makePayload = () => ({
-      messageId: msg1Id,
+      messageId: msg2Id,
       eventType: 'FAILED' as const,
       timestamp: new Date().toISOString(),
       metadata:  { reason: 'DELIVERY_ERROR' },

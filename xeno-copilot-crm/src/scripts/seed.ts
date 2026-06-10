@@ -47,10 +47,6 @@ function daysAgo(n: number): Date {
   return new Date(Date.now() - n * 86_400_000);
 }
 
-function hoursAgo(n: number): Date {
-  return new Date(Date.now() - n * 3_600_000);
-}
-
 function randFrom<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -223,29 +219,63 @@ interface CustomerLite {
   name:  string;
 }
 
-async function seedCampaignDeliveryData(campaign1Id: Types.ObjectId): Promise<void> {
-  // Fetch 10 customers from each target segment (they exist after computeRFM)
+// Returns the number of CampaignMessage documents actually inserted so the
+// caller can write that count back to Campaign.totalRecipients.
+async function seedCampaignDeliveryData(campaign1Id: Types.ObjectId): Promise<number> {
+  // Fetch up to 10 customers from each target segment (they exist after computeRFM).
+  // sort(_id:1) makes the selection deterministic across re-runs on the same dataset.
   const dormantVips = await Customer.find(
     { rfmSegment: 'DORMANT_VIPS' },
     { _id: 1, phone: 1, email: 1, name: 1 },
-  ).limit(10).lean() as CustomerLite[];
+  ).sort({ _id: 1 }).limit(10).lean() as CustomerLite[];
 
   const lapsedLow = await Customer.find(
     { rfmSegment: 'LAPSED_LOW_VALUE' },
     { _id: 1, phone: 1, email: 1, name: 1 },
-  ).limit(10).lean() as CustomerLite[];
+  ).sort({ _id: 1 }).limit(10).lean() as CustomerLite[];
 
-  if (dormantVips.length < 10 || lapsedLow.length < 10) {
-    console.warn('[seed] Warning: not enough customers for delivery simulation — skipping.');
-    return;
+  if (dormantVips.length === 0 && lapsedLow.length === 0) {
+    console.warn('[seed] Warning: no segmented customers found — skipping delivery simulation.');
+    return 0;
   }
 
   // Create 2 CampaignClusters ────────────────────────────────────────────────
   const cluster1Id = new Types.ObjectId();
   const cluster2Id = new Types.ObjectId();
 
-  const WA_STATS  = { queued: 10, sent: 10, delivered: 9, failed: 0, opened: 7, clicked: 4, converted: 2 };
-  const EM_STATS  = { queued: 10, sent: 10, delivered: 9, failed: 0, opened: 5, clicked: 2, converted: 1 };
+  // Clamp to however many customers are actually available.
+  const waCustomers = dormantVips.slice(0, Math.min(dormantVips.length, WA_TIERS.length));
+  const emCustomers = lapsedLow.slice(0, Math.min(lapsedLow.length, EMAIL_TIERS.length));
+  const waTiers     = WA_TIERS.slice(0, waCustomers.length);
+  const emTiers     = EMAIL_TIERS.slice(0, emCustomers.length);
+
+  // Pre-aggregate stats from the tiers we will actually use so the CampaignCluster
+  // stats field is always consistent with the inserted CommunicationEvent documents.
+  function countTierField(
+    tiers: FunnelTier[],
+    field: 'SENT' | 'DELIVERED' | 'OPENED' | 'CLICKED' | 'CONVERTED',
+  ): number {
+    return tiers.filter((t) => t.events.includes(field)).length;
+  }
+
+  const WA_STATS = {
+    queued:    waCustomers.length,
+    sent:      countTierField(waTiers, 'SENT'),
+    delivered: countTierField(waTiers, 'DELIVERED'),
+    failed:    0,
+    opened:    countTierField(waTiers, 'OPENED'),
+    clicked:   countTierField(waTiers, 'CLICKED'),
+    converted: countTierField(waTiers, 'CONVERTED'),
+  };
+  const EM_STATS = {
+    queued:    emCustomers.length,
+    sent:      countTierField(emTiers, 'SENT'),
+    delivered: countTierField(emTiers, 'DELIVERED'),
+    failed:    0,
+    opened:    countTierField(emTiers, 'OPENED'),
+    clicked:   countTierField(emTiers, 'CLICKED'),
+    converted: countTierField(emTiers, 'CONVERTED'),
+  };
 
   await CampaignCluster.insertMany([
     {
@@ -373,8 +403,8 @@ async function seedCampaignDeliveryData(campaign1Id: Types.ObjectId): Promise<vo
     });
   };
 
-  buildClusterMessages(dormantVips, cluster1Id, 'WHATSAPP', WA_TIERS,    173);
-  buildClusterMessages(lapsedLow,   cluster2Id, 'EMAIL',    EMAIL_TIERS, 170);
+  buildClusterMessages(waCustomers, cluster1Id, 'WHATSAPP', waTiers, 173);
+  buildClusterMessages(emCustomers, cluster2Id, 'EMAIL',    emTiers, 170);
 
   // Insert in batches
   await CampaignMessage.insertMany(messageDocs, { ordered: false });
@@ -382,6 +412,8 @@ async function seedCampaignDeliveryData(campaign1Id: Types.ObjectId): Promise<vo
 
   await CommunicationEvent.insertMany(eventDocs, { ordered: false });
   console.log(`[seed] Inserted ${eventDocs.length} communication_events for campaign 1.`);
+
+  return messageDocs.length;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -480,10 +512,14 @@ async function seed(): Promise<void> {
     totalOpened:    s.totalOpened,
     totalClicked:   s.totalClicked,
     totalConverted: s.totalConverted,
-    deliveryRate:   s.totalSent     > 0 ? Math.round(s.totalDelivered / s.totalSent     * 1000) / 1000 : 0,
+    deliveryRate:   s.totalSent      > 0 ? Math.round(s.totalDelivered / s.totalSent      * 1000) / 1000 : 0,
     openRate:       s.totalDelivered > 0 ? Math.round(s.totalOpened   / s.totalDelivered * 1000) / 1000 : 0,
-    clickRate:      s.totalOpened   > 0 ? Math.round(s.totalClicked   / s.totalOpened   * 1000) / 1000 : 0,
-    conversionRate: s.totalSent     > 0 ? Math.round(s.totalConverted / s.totalSent     * 1000) / 1000 : 0,
+    // SMS has no open-tracking: fall back to delivered as the denominator so
+    // the 42 clicks are not silently discarded.
+    clickRate:      s.totalOpened    > 0
+      ? Math.round(s.totalClicked / s.totalOpened   * 1000) / 1000
+      : (s.totalDelivered > 0 ? Math.round(s.totalClicked / s.totalDelivered * 1000) / 1000 : 0),
+    conversionRate: s.totalSent      > 0 ? Math.round(s.totalConverted / s.totalSent      * 1000) / 1000 : 0,
     campaignCount:  s.campaignCount,
     lastUpdatedAt:  new Date(),
   }));
@@ -513,7 +549,7 @@ async function seed(): Promise<void> {
         count: 447, medianAOV: 2800,
         channelMix: { WHATSAPP: 312, EMAIL: 135 }, savedAt: daysAgo(175),
       },
-      totalRecipients:  20,    // matches the 20 CampaignMessages we create below
+      totalRecipients:  null,   // set below after seedCampaignDeliveryData() runs
       scheduledAt:      null,
       launchedAt:       daysAgo(175),
       completedAt:      daysAgo(161),
@@ -569,7 +605,14 @@ async function seed(): Promise<void> {
 
   // Seed delivery funnel data for campaign 1 ─────────────────────────────────
   console.log('[seed] Seeding delivery events for campaign 1...');
-  await seedCampaignDeliveryData(campaign1Id);
+  const campaign1Messages = await seedCampaignDeliveryData(campaign1Id);
+
+  // Write the actual message count back — this must happen after seeding so the
+  // value is always consistent with what's in campaign_messages.
+  await Campaign.updateOne(
+    { _id: campaign1Id },
+    { $set: { totalRecipients: campaign1Messages } },
+  );
 
   // ─── Summary ──────────────────────────────────────────────────────────────
 
@@ -586,9 +629,6 @@ async function seed(): Promise<void> {
       CampaignMessage.estimatedDocumentCount(),
       CommunicationEvent.estimatedDocumentCount(),
     ]);
-
-  // Unused variable suppressed — hoursAgo used only in this file
-  void hoursAgo;
 
   console.log('\n[seed] ─── Seed complete ───────────────────────────────────────');
   console.log(`  Customers:            ${totalCustomers}`);
