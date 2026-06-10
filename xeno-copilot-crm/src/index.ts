@@ -12,6 +12,8 @@ import importRouter    from './routes/import.routes';
 import customersRouter from './routes/customers.routes';
 import ordersRouter    from './routes/orders.routes';
 import segmentsRouter  from './routes/segments.routes';
+import campaignsRouter from './routes/campaigns.routes';
+import aiRouter        from './routes/ai.routes';
 
 // ─── Env validation ───────────────────────────────────────────────────────────
 // Fail fast on startup if required variables are missing.
@@ -56,6 +58,8 @@ app.use('/api/v1/import',    importRouter);
 app.use('/api/v1/customers', customersRouter);
 app.use('/api/v1/orders',    ordersRouter);
 app.use('/api/v1/segments',  segmentsRouter);
+app.use('/api/v1/campaigns', campaignsRouter);
+app.use('/api/v1/ai',        aiRouter);
 
 // Bare /health alias (Render health check pings this path by default)
 app.get('/health', (_req, res) => {
