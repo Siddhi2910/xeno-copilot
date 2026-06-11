@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { DataTable } from '@/components/tables/DataTable';
 import { CursorPagination } from '@/components/shared/CursorPagination';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { messageColumns } from '@/components/campaigns/messagesColumns';
 import { Button } from '@/components/ui/button';
 import { useCampaign } from '@/lib/hooks/useCampaign';
@@ -17,7 +18,7 @@ const STATUSES: (MessageStatus | '')[] = ['', 'QUEUED', 'SENT', 'DELIVERED', 'OP
 
 function MessagesContent({ campaignId }: { campaignId: string }) {
   const { data: campaign } = useCampaign(campaignId);
-  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } = useCampaignMessages(campaignId);
+  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, isError, refetch } = useCampaignMessages(campaignId);
   const [statusFilter, setStatusFilter] = useState<MessageStatus | ''>('');
 
   const rows = useMemo(() => {
@@ -40,7 +41,13 @@ function MessagesContent({ campaignId }: { campaignId: string }) {
         columns={messageColumns}
         data={rows}
         isLoading={isLoading}
-        emptyState={<EmptyState icon={Mail} heading="No messages" description="Messages appear after campaign launch." />}
+        emptyState={
+          isError ? (
+            <ErrorState heading="Failed to load messages" onRetry={() => refetch()} />
+          ) : (
+            <EmptyState icon={Mail} heading="No messages" description="Messages appear after campaign launch." />
+          )
+        }
         filterBar={
           <select
             value={statusFilter}

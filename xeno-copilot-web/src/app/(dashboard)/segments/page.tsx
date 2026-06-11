@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { PieChart } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { DonutChart } from '@/components/charts/DonutChart';
 import { SegmentBarChart } from '@/components/charts/SegmentBarChart';
 import { AudiencePreview } from '@/components/segments/AudiencePreview';
@@ -23,7 +24,7 @@ function SegmentsContent() {
 
   const { data, isLoading, isError } = useSegments();
 
-  const segments = data?.segments ?? [];
+  const segments = useMemo(() => data?.segments ?? [], [data?.segments]);
   const filteredCards = useMemo(
     () => (highlight ? segments.filter((s) => s.segment === highlight) : segments),
     [segments, highlight],
@@ -44,11 +45,7 @@ function SegmentsContent() {
   if (isError || !data) {
     return (
       <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <EmptyState
-          icon={PieChart}
-          heading="Failed to load segments"
-          description="Check your connection and try again."
-        />
+        <ErrorState heading="Failed to load segments" description="Check your connection and try again." onRetry={() => window.location.reload()} />
       </div>
     );
   }

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Megaphone } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { CampaignStatusBadge } from '@/components/campaigns/CampaignStatusBadge';
@@ -14,6 +14,8 @@ import { ClusterCard } from '@/components/campaigns/ClusterCard';
 import { AiReportViewer } from '@/components/ai/AiReportViewer';
 import { AiRecommendations } from '@/components/ai/AiRecommendations';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { SkeletonCards } from '@/components/shared/SkeletonCards';
 import { Button } from '@/components/ui/button';
 import { useCampaign } from '@/lib/hooks/useCampaign';
@@ -25,7 +27,7 @@ import { formatDate, formatNumber } from '@/lib/utils/formatters';
 export default function CampaignDetailPage({ params }: { params: { campaignId: string } }) {
   const { campaignId } = params;
   const router = useRouter();
-  const { data: campaign, isLoading } = useCampaign(campaignId);
+  const { data: campaign, isLoading, isError, refetch } = useCampaign(campaignId);
   const { data: stats, isLoading: statsLoading } = useCampaignStats(campaignId, campaign?.status);
   const cache = useCampaignWizardStore((s) => s.campaignCache[campaignId]);
   const markReady = useMarkCampaignReady();
@@ -33,7 +35,12 @@ export default function CampaignDetailPage({ params }: { params: { campaignId: s
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <SkeletonCards count={4} />;
-  if (!campaign) return <p className="text-slate-500">Campaign not found.</p>;
+  if (isError) return <ErrorState heading="Failed to load campaign" onRetry={() => refetch()} />;
+  if (!campaign) {
+    return (
+      <EmptyState icon={Megaphone} heading="Campaign not found" description="This campaign may have been removed." action={{ label: 'Back to campaigns', href: '/campaigns' }} />
+    );
+  }
 
   const snap = campaign.audienceSnapshot;
   const canReady = campaign.status === 'DRAFT';

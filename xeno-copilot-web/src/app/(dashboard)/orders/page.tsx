@@ -10,6 +10,7 @@ import { FilterBar } from '@/components/forms/FilterBar';
 import { DateRangePicker } from '@/components/forms/DateRangePicker';
 import { CursorPagination } from '@/components/shared/CursorPagination';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { orderColumns } from '@/components/orders/columns';
 import { useOrders } from '@/lib/hooks/useOrders';
 import { ORDER_CHANNELS } from '@/lib/constants/channels';
@@ -78,7 +79,7 @@ function OrdersContent() {
         isLoading={isLoading}
         emptyState={
           isError ? (
-            <EmptyState icon={ShoppingBag} heading="Failed to load orders" description="Check your connection and try again." />
+            <ErrorState heading="Failed to load orders" description="Check your connection and try again." onRetry={() => window.location.reload()} />
           ) : (
             <EmptyState
               icon={ShoppingBag}

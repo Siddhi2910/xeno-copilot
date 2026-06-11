@@ -51,6 +51,7 @@ export function DataTable<T>({
                   {hg.headers.map((header) => (
                     <th
                       key={header.id}
+                      scope="col"
                       className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500"
                     >
                       {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}

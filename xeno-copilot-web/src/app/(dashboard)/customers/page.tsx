@@ -9,6 +9,7 @@ import { SearchInput } from '@/components/forms/SearchInput';
 import { FilterBar } from '@/components/forms/FilterBar';
 import { CursorPagination } from '@/components/shared/CursorPagination';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { customerColumns } from '@/components/customers/columns';
 import { useCustomers } from '@/lib/hooks/useCustomers';
 import { RFM_SEGMENTS } from '@/lib/constants/segments';
@@ -61,7 +62,7 @@ function CustomersContent() {
         isLoading={isLoading}
         emptyState={
           isError ? (
-            <EmptyState icon={Users} heading="Failed to load customers" description="Check your connection and try again." />
+            <ErrorState heading="Failed to load customers" description="Check your connection and try again." onRetry={() => window.location.reload()} />
           ) : (
             <EmptyState
               icon={Users}

@@ -9,6 +9,7 @@ import { DataTable } from '@/components/tables/DataTable';
 import { SearchInput } from '@/components/forms/SearchInput';
 import { CursorPagination } from '@/components/shared/CursorPagination';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { RfmSegmentBadge } from '@/components/shared/RfmSegmentBadge';
 import { ChannelReachIndicator } from '@/components/segments/ChannelReachIndicator';
 import { segmentCustomerColumns } from '@/components/segments/columns';
@@ -104,7 +105,7 @@ export function AudienceExplorer({ segmentName, stats, statsLoading }: AudienceE
         isLoading={isLoading}
         emptyState={
           isError ? (
-            <EmptyState icon={Users} heading="Failed to load customers" description="Check your connection and try again." />
+            <ErrorState heading="Failed to load customers" description="Check your connection and try again." onRetry={() => window.location.reload()} />
           ) : stats?.count === 0 ? (
             <EmptyState
               icon={Users}
