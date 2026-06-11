@@ -36,7 +36,8 @@ async function requireSession(request: NextRequest): Promise<NextResponse | null
 }
 
 function buildTargetUrl(baseUrl: string, pathSegments: string[], search: string): string {
-  const normalizedBase = baseUrl.replace(/\/$/, '');
+  let normalizedBase = baseUrl.replace(/\/$/, '');
+  if (normalizedBase.endsWith('/api/v1')) normalizedBase = normalizedBase.slice(0, -7);
   const path = pathSegments.join('/');
   const apiPath = path.startsWith('api/v1/') ? path : `api/v1/${path}`;
   return `${normalizedBase}/${apiPath}${search}`;
