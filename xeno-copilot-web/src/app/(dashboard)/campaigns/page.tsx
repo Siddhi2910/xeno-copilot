@@ -7,7 +7,8 @@ import { Megaphone, Plus } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { CampaignCard } from '@/components/campaigns/CampaignCard';
 import { CursorPagination } from '@/components/shared/CursorPagination';
-import { EmptyState } from '@/components/shared/EmptyState';
+import { AnimatedEmptyState } from '@/components/shared/AnimatedEmptyState';
+import { ErrorState } from '@/components/shared/ErrorState';
 import { SkeletonCards } from '@/components/shared/SkeletonCards';
 import { Button } from '@/components/ui/button';
 import { useCampaigns } from '@/lib/hooks/useCampaigns';
@@ -80,9 +81,9 @@ function CampaignsContent() {
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"><SkeletonCards count={6} /></div>
       ) : isError ? (
-        <EmptyState icon={Megaphone} heading="Failed to load campaigns" description="Check your connection." />
+        <ErrorState heading="Failed to load campaigns" description="Check your connection." onRetry={() => window.location.reload()} />
       ) : rows.length === 0 ? (
-        <EmptyState icon={Megaphone} heading={empty.heading} description={empty.description} action={empty.action} />
+        <AnimatedEmptyState icon={Megaphone} heading={empty.heading} description={empty.description} action={empty.action} />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

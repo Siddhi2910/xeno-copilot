@@ -55,6 +55,8 @@ export function DonutChart({ segments, totalCustomers, isLoading, activeSegment 
             outerRadius={90}
             paddingAngle={2}
             dataKey="value"
+            animationBegin={0}
+            animationDuration={800}
             onClick={(_, i) => router.push(`/segments/${data[i].segment}`)}
             className="cursor-pointer"
           >

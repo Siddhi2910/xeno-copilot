@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { AiThinkingState } from '@/components/ai/AiThinkingState';
+import { THINKING_COPY } from '@/lib/constants/aiCopy';
+import { useUiStore } from '@/lib/stores/uiStore';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { ChannelMixBar } from '@/components/campaigns/ChannelMixBar';
 import { ClusterCard } from '@/components/campaigns/ClusterCard';
@@ -17,12 +20,14 @@ import type { IntentType } from '@/lib/types/ai';
 export function Step2Preview() {
   const { goalText, intentResult, audiencePreview, setAudiencePreview, setStep } = useCampaignWizardStore();
   const [loading, setLoading] = useState(!audiencePreview);
+  const setAiThinking = useUiStore((s) => s.setAiThinking);
 
   useEffect(() => {
     if (audiencePreview || !intentResult?.intentType) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setAiThinking(true);
       try {
         const res = await previewAudienceWithAI({
           goalText,
@@ -33,16 +38,19 @@ export function Step2Preview() {
       } catch (err) {
         toast({ title: 'Audience preview failed', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setAiThinking(false);
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [audiencePreview, intentResult, goalText, setAudiencePreview]);
+  }, [audiencePreview, intentResult, goalText, setAudiencePreview, setAiThinking]);
 
   if (loading) {
     return (
       <div className="space-y-6">
-        <p className="flex items-center gap-2 text-sm text-indigo-600"><Loader2 className="h-4 w-4 animate-spin" /> Building your audience…</p>
+        <AiThinkingState phrases={THINKING_COPY.preview} />
         <SkeletonCards count={3} />
       </div>
     );
@@ -56,7 +64,9 @@ export function Step2Preview() {
     <div className="space-y-6">
       <h2 className="text-xl font-semibold">Your audience</h2>
       <div className="grid gap-4 sm:grid-cols-3">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
         <MetricCard label="Audience Size" value={formatNumber(audience.count)} variant="featured" />
+        </motion.div>
         <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Revenue Estimate</p>
           <div className="mt-3"><RevenueEstimatePanel estimate={revenueEstimate} /></div>

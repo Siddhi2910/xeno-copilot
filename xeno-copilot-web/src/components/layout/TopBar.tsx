@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Menu, Moon, Sun, Upload, User } from 'lucide-react';
+import { Menu, Moon, Search, Sun, Upload, User } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -35,16 +35,26 @@ export function TopBar() {
       >
         <Menu className="h-5 w-5" />
       </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="md:hidden"
+        aria-label="Search"
+        onClick={() => useUiStore.getState().setCommandPaletteOpen(true)}
+      >
+        <Search className="h-5 w-5" />
+      </Button>
 
-      <div className="hidden flex-1 md:block">
-        <input
-          type="search"
-          placeholder="Search campaigns, customers…"
-          className="h-9 w-full max-w-sm rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          disabled
-          aria-label="Search"
-        />
-      </div>
+      <button
+        type="button"
+        onClick={() => useUiStore.getState().setCommandPaletteOpen(true)}
+        className="hidden h-9 w-full max-w-sm items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-400 md:flex dark:border-slate-700 dark:bg-slate-900"
+        aria-label="Open command palette"
+      >
+        <span>Search campaigns, customers…</span>
+        <kbd className="rounded border border-slate-200 px-1.5 text-xs dark:border-slate-600">⌘K</kbd>
+      </button>
 
       <div className="ml-auto flex items-center gap-2">
         <Button variant="outline" size="sm" asChild className="hidden sm:inline-flex">

@@ -1,10 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AiThinkingState } from '@/components/ai/AiThinkingState';
 import { extractIntent } from '@/lib/api/ai';
+import { THINKING_COPY } from '@/lib/constants/aiCopy';
 import { useCampaignWizardStore } from '@/lib/stores/campaignWizardStore';
+import { useUiStore } from '@/lib/stores/uiStore';
 import { toast } from '@/lib/hooks/use-toast';
 const PROMPTS = [
   'Re-engage dormant VIP customers',
@@ -15,9 +19,11 @@ const PROMPTS = [
 export function Step1Goal() {
   const { goalText, intentResult, setGoalText, setIntentResult, setCampaignName, setStep } = useCampaignWizardStore();
   const [loading, setLoading] = useState(false);
+  const setAiThinking = useUiStore((s) => s.setAiThinking);
 
   async function handleExtract() {
     setLoading(true);
+    setAiThinking(true);
     try {
       const res = await extractIntent(goalText);
       setIntentResult(res.data);
@@ -26,6 +32,7 @@ export function Step1Goal() {
       toast({ title: 'Intent extraction failed', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
     } finally {
       setLoading(false);
+      setAiThinking(false);
     }
   }
 
@@ -56,11 +63,21 @@ export function Step1Goal() {
         ))}
       </div>
       <p className="text-right text-xs text-slate-400">{goalText.length}/500</p>
-      <Button onClick={handleExtract} disabled={goalText.length < 5 || loading}>
-        {loading ? <><Loader2 className="animate-spin" /> Analyzing your goal…</> : 'Extract Intent →'}
-      </Button>
+      {goalText.length >= 10 ? (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+          <Button onClick={handleExtract} disabled={goalText.length < 5 || loading}>
+            {loading ? 'Stop thinking ×' : 'Extract Intent →'}
+          </Button>
+        </motion.div>
+      ) : null}
+      {loading ? <AiThinkingState phrases={THINKING_COPY.intent} /> : null}
+      <AnimatePresence>
       {intentResult?.intentType ? (
-        <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-5 dark:border-indigo-900 dark:bg-indigo-950/30">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-5 dark:border-indigo-900 dark:bg-indigo-950/30"
+        >
           <p className="flex items-center gap-2 font-medium text-indigo-700 dark:text-indigo-300">
             <Sparkles className="h-4 w-4" /> {intentResult.intentType.replace(/_/g, ' ')}
           </p>
@@ -69,8 +86,9 @@ export function Step1Goal() {
             <Button variant="outline" onClick={() => setIntentResult(null)}>← Edit Goal</Button>
             <Button onClick={() => setStep(2)}>Continue to Preview →</Button>
           </div>
-        </div>
+        </motion.div>
       ) : null}
+      </AnimatePresence>
     </div>
   );
 }

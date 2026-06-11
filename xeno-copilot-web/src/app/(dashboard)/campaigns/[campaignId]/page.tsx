@@ -11,7 +11,8 @@ import { ChannelMixBar } from '@/components/campaigns/ChannelMixBar';
 import { RevenueEstimatePanel } from '@/components/campaigns/RevenueEstimatePanel';
 import { FunnelChart } from '@/components/charts/FunnelChart';
 import { ClusterCard } from '@/components/campaigns/ClusterCard';
-import { AiReportPanel } from '@/components/campaigns/AiReportPanel';
+import { AiReportViewer } from '@/components/ai/AiReportViewer';
+import { AiRecommendations } from '@/components/ai/AiRecommendations';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { SkeletonCards } from '@/components/shared/SkeletonCards';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,8 @@ export default function CampaignDetailPage({ params }: { params: { campaignId: s
           </div>
         }
       />
+
+      <AiRecommendations campaign={campaign} />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <MetricCard label="Audience Size" value={formatNumber(campaign.totalRecipients ?? snap?.count ?? 0)} variant="featured" />
@@ -109,7 +112,7 @@ export default function CampaignDetailPage({ params }: { params: { campaignId: s
         </div>
       ) : null}
 
-      {campaign.aiReport ? <AiReportPanel report={campaign.aiReport} /> : null}
+      {campaign.aiReport ? <AiReportViewer report={campaign.aiReport} /> : null}
 
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="outline">

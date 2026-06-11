@@ -1,21 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AiThinkingState } from '@/components/ai/AiThinkingState';
+import { CritiqueDiff } from '@/components/ai/CritiqueDiff';
 import { CritiqueIssueList } from '@/components/campaigns/CritiqueIssueList';
 import { refineCampaign } from '@/lib/api/ai';
+import { REFINE_PLACEHOLDERS, THINKING_COPY } from '@/lib/constants/aiCopy';
 import { useCampaignWizardStore } from '@/lib/stores/campaignWizardStore';
+import { useUiStore } from '@/lib/stores/uiStore';
 import { toast } from '@/lib/hooks/use-toast';
 
 export function Step4Refine() {
-  const { campaignId, refineResult, setRefineResult, setStep } = useCampaignWizardStore();
+  const { campaignId, intentResult, refineResult, setRefineResult, setStep } = useCampaignWizardStore();
   const [feedback, setFeedback] = useState('');
   const [loading, setLoading] = useState(false);
+  const setAiThinking = useUiStore((s) => s.setAiThinking);
+  const placeholder =
+    REFINE_PLACEHOLDERS[intentResult?.intentType ?? ''] ?? 'Make the WhatsApp messages more casual…';
 
   async function handleRefine() {
     if (!campaignId) return;
     setLoading(true);
+    setAiThinking(true);
     try {
       const res = await refineCampaign(campaignId, feedback || undefined);
       setRefineResult(res.data);
@@ -23,6 +30,7 @@ export function Step4Refine() {
       toast({ title: 'Refinement failed', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
     } finally {
       setLoading(false);
+      setAiThinking(false);
     }
   }
 
@@ -35,23 +43,18 @@ export function Step4Refine() {
         onChange={(e) => setFeedback(e.target.value)}
         rows={3}
         maxLength={500}
-        placeholder="Make the WhatsApp messages more casual…"
+        placeholder={placeholder}
         className="w-full rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700 dark:bg-slate-900"
       />
       <Button onClick={handleRefine} disabled={loading}>
-        {loading ? <><Loader2 className="animate-spin" /> Reviewing…</> : 'Run Refinement →'}
+        {loading ? 'Stop thinking ×' : 'Run Refinement →'}
       </Button>
+      {loading ? <AiThinkingState phrases={THINKING_COPY.critique} /> : null}
       {refineResult ? (
         <div className="space-y-4">
           <CritiqueIssueList issues={refineResult.deterministicIssues} />
-          {refineResult.critiqueNotes ? <p className="text-sm text-slate-600">{refineResult.critiqueNotes}</p> : null}
-          {refineResult.changesApplied.map((c) => (
-            <div key={`${c.clusterLabel}-${c.channel}`} className="rounded border border-slate-200 p-3 text-sm dark:border-slate-800">
-              <p className="font-medium">{c.clusterLabel} / {c.channel}</p>
-              <p className="mt-1 text-slate-500 line-through">{c.before.slice(0, 80)}…</p>
-              <p className="text-slate-700 dark:text-slate-300">{c.after.slice(0, 80)}…</p>
-            </div>
-          ))}
+          {refineResult.critiqueNotes ? <p className="text-sm text-slate-600 dark:text-slate-400">{refineResult.critiqueNotes}</p> : null}
+          <CritiqueDiff changes={refineResult.changesApplied} />
         </div>
       ) : null}
       <div className="flex gap-2">

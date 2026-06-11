@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { AiThinkingState } from '@/components/ai/AiThinkingState';
+import { THINKING_COPY } from '@/lib/constants/aiCopy';
+import { useUiStore } from '@/lib/stores/uiStore';
 import { Input } from '@/components/ui/input';
 import { ClusterCard } from '@/components/campaigns/ClusterCard';
 import { SkeletonCards } from '@/components/shared/SkeletonCards';
@@ -17,12 +20,14 @@ export function Step3Generate() {
     setCampaignId, cacheCampaign, setStep,
   } = useCampaignWizardStore();
   const [loading, setLoading] = useState(!generatedResult);
+  const setAiThinking = useUiStore((s) => s.setAiThinking);
 
   useEffect(() => {
     if (generatedResult || !intentResult?.intentType) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setAiThinking(true);
       try {
         const res = await generateCampaign({
           name: campaignName || intentResult.suggestedName || 'New Campaign',
@@ -38,18 +43,24 @@ export function Step3Generate() {
       } catch (err) {
         toast({ title: 'Generation failed', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setAiThinking(false);
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [generatedResult, intentResult, goalText, campaignName, setGeneratedResult, setCampaignId, cacheCampaign]);
+  }, [generatedResult, intentResult, goalText, campaignName, setGeneratedResult, setCampaignId, cacheCampaign, setAiThinking]);
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <p className="flex items-center gap-2 text-sm text-indigo-600"><Loader2 className="h-4 w-4 animate-spin" /> Generating campaign messages…</p>
+      <motion.div initial={{ opacity: 0.4 }} animate={{ opacity: 1 }} className="space-y-6 rounded-lg p-6">
+        <AiThinkingState phrases={THINKING_COPY.generate} />
+        <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+          <motion.div className="h-full bg-indigo-600" initial={{ width: '10%' }} animate={{ width: ['30%', '60%', '90%'] }} transition={{ duration: 8, ease: 'easeInOut' }} />
+        </div>
         <SkeletonCards count={2} />
-      </div>
+      </motion.div>
     );
   }
 
