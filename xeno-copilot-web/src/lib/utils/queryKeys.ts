@@ -23,4 +23,12 @@ export const queryKeys = {
     list: () => ['segments', 'list'] as const,
     customers: (name: string, cursor?: string) => ['segments', name, 'customers', cursor] as const,
   },
+  importJobs: {
+    all: ['import'] as const,
+    list: (limit?: number) => ['import', 'list', limit] as const,
+  },
+  analytics: {
+    orders: (start: string, end: string) => ['analytics', 'orders', start, end] as const,
+    campaignStats: (ids: string[]) => ['analytics', 'campaignStats', ids] as const,
+  },
 };

@@ -12,6 +12,12 @@ export const CAMPAIGN_STATUS_META: Record<
   FAILED: { label: 'Failed', className: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' },
 };
 
+export const IMPORT_STATUS_META: Record<string, { label: string; className: string }> = {
+  PROCESSING: { label: 'Processing', className: 'bg-amber-100 text-amber-800' },
+  COMPLETED: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800' },
+  FAILED: { label: 'Failed', className: 'bg-rose-100 text-rose-800' },
+};
+
 export const MESSAGE_STATUS_META: Record<MessageStatus, { label: string; className: string }> = {
   QUEUED: { label: 'Queued', className: 'bg-slate-100 text-slate-600' },
   SENT: { label: 'Sent', className: 'bg-blue-100 text-blue-800' },
