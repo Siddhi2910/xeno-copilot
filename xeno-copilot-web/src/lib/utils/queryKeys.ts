@@ -10,4 +10,9 @@ export const queryKeys = {
     all: ['orders'] as const,
     list: (filters: ListOrdersParams) => ['orders', 'list', filters] as const,
   },
+  segments: {
+    all: ['segments'] as const,
+    list: () => ['segments', 'list'] as const,
+    customers: (name: string, cursor?: string) => ['segments', name, 'customers', cursor] as const,
+  },
 };

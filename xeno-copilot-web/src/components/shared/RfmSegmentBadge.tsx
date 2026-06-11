@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils/cn';
 import { segmentColor } from '@/lib/utils/colors';
+import { SEGMENT_CHART_COLORS } from '@/lib/constants/segments';
 import type { RfmSegment } from '@/lib/types/customer';
 import { RFM_SEGMENTS } from '@/lib/constants/segments';
 
@@ -14,11 +15,16 @@ export function RfmSegmentBadge({ segment, className }: RfmSegmentBadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
         segmentColor(segment),
         className,
       )}
     >
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: SEGMENT_CHART_COLORS[segment] }}
+        aria-hidden
+      />
       {label}
     </span>
   );

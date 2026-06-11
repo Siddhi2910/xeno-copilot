@@ -14,3 +14,7 @@ export function formatDate(iso: string | null | undefined): string {
 export function formatNumber(n: number): string {
   return new Intl.NumberFormat('en-IN').format(n);
 }
+
+export function formatPercent(n: number, decimals = 1): string {
+  return `${n.toFixed(decimals)}%`;
+}
