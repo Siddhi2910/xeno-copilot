@@ -20,6 +20,8 @@ export function Step3Generate() {
     setCampaignId, cacheCampaign, setStep,
   } = useCampaignWizardStore();
   const [loading, setLoading] = useState(!generatedResult);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const setAiThinking = useUiStore((s) => s.setAiThinking);
 
   useEffect(() => {
@@ -27,6 +29,7 @@ export function Step3Generate() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setGenError(null);
       setAiThinking(true);
       try {
         const res = await generateCampaign({
@@ -41,6 +44,7 @@ export function Step3Generate() {
           cacheCampaign(res.data.campaignId, { clusterCards: res.data.clusterCards, clusters: res.data.clusters });
         }
       } catch (err) {
+        if (!cancelled) setGenError(err instanceof Error ? err.message : 'Generation failed.');
         toast({ title: 'Generation failed', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
       } finally {
         if (!cancelled) {
@@ -50,7 +54,7 @@ export function Step3Generate() {
       }
     })();
     return () => { cancelled = true; };
-  }, [generatedResult, intentResult, goalText, campaignName, setGeneratedResult, setCampaignId, cacheCampaign, setAiThinking]);
+  }, [generatedResult, intentResult, goalText, campaignName, setGeneratedResult, setCampaignId, cacheCampaign, setAiThinking, retryCount]);
 
   if (loading) {
     return (
@@ -64,7 +68,19 @@ export function Step3Generate() {
     );
   }
 
-  if (!generatedResult) return null;
+  if (!generatedResult) {
+    return (
+      <div className="space-y-4 rounded-lg border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/30">
+        <p className="text-sm text-red-700 dark:text-red-300">
+          {genError ?? 'Campaign generation failed. Please try again.'}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setStep(2)}>← Back</Button>
+          <Button onClick={() => { setRetryCount((n) => n + 1); setLoading(true); }}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

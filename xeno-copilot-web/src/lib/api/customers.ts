@@ -11,6 +11,10 @@ export interface ListCustomersParams {
   limit?: number;
 }
 
+export function getCustomer(id: string): Promise<{ data: Customer }> {
+  return apiFetch<{ data: Customer }>(`customers/${id}`);
+}
+
 export function listCustomers(params: ListCustomersParams = {}): Promise<PaginatedResponse<Customer>> {
   const qs = new URLSearchParams();
   if (params.rfmSegment) qs.set('rfmSegment', params.rfmSegment);
