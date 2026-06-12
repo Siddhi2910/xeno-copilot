@@ -36,7 +36,7 @@ function getClient(): GoogleGenerativeAI {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type GeminiModel = 'gemini-1.5-flash' | 'gemini-1.5-pro';
+export type GeminiModel = 'gemini-2.5-flash-lite';
 
 export interface GeminiCallResult {
   text:         string;
@@ -48,12 +48,10 @@ export interface GeminiCallResult {
 // ─── Cost table (AI_FEATURES.md §9) ──────────────────────────────────────────
 
 const INPUT_COST_PER_M: Record<GeminiModel, number>  = {
-  'gemini-1.5-flash': 0.075,
-  'gemini-1.5-pro':   1.25,
+  'gemini-2.5-flash-lite': 0.075,
 };
 const OUTPUT_COST_PER_M: Record<GeminiModel, number> = {
-  'gemini-1.5-flash': 0.30,
-  'gemini-1.5-pro':   5.00,
+  'gemini-2.5-flash-lite': 0.30,
 };
 
 export function estimateCostUsd(

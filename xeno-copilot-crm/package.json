@@ -4,8 +4,9 @@
   "description": "Xeno Copilot CRM Service",
   "main": "dist/index.js",
   "scripts": {
+    "dev-mongo": "node scripts/dev-mongo.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc",
+    "build": "tsc && xcopy /E /I /Y src\\prompts dist\\prompts",
     "start": "node dist/index.js",
     "seed": "ts-node src/scripts/seed.ts",
     "smoke": "ts-node src/scripts/smoke-test.ts"

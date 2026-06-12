@@ -2,7 +2,7 @@
  * messageGeneration.service.ts — Call 3
  *
  * Generates channel-specific marketing messages for each audience cluster.
- * Uses gemini-1.5-pro for higher-quality creative output.
+ * Uses gemini-2.5-flash-lite for higher-quality creative output.
  *
  * Post-generation validation (AI_FEATURES.md §5 Failure Handling):
  *   CR-A  {name} token present in every message
@@ -99,7 +99,7 @@ function validateLlmOutput(raw: unknown): LlmMsgCluster[] {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
-const MODEL       = 'gemini-1.5-pro' as const;
+const MODEL       = 'gemini-2.5-flash-lite' as const;
 const TEMPERATURE = 0.7;
 const MAX_TOKENS  = 1024;
 const TIMEOUT_MS  = 8_000;
@@ -286,6 +286,11 @@ export async function generateMessages(opts: {
       });
 
       if (err instanceof AppError) throw err;
+
+      // Surface rate-limit / quota errors immediately with a clear message
+      if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota')) {
+        throw new AppError(429, 'RATE_LIMITED', 'AI quota exceeded. Please wait a moment and try again.');
+      }
 
       if (attempt > MAX_RETRIES) {
         throw new AppError(502, 'AI_UNAVAILABLE', 'Message generation failed after retries. Please try again.');

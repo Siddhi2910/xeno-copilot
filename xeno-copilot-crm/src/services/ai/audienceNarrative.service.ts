@@ -101,7 +101,7 @@ function validateLlmOutput(raw: unknown): LlmNarrativeOutput {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
-const MODEL       = 'gemini-1.5-flash' as const;
+const MODEL       = 'gemini-2.5-flash-lite' as const;
 const TEMPERATURE = 0.4;
 const MAX_TOKENS  = 768;
 const TIMEOUT_MS  = 5_000;

@@ -88,7 +88,7 @@ function validateLlmOutput(raw: unknown): LlmIntentOutput {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
-const MODEL       = 'gemini-1.5-flash' as const;
+const MODEL       = 'gemini-2.5-flash-lite' as const;
 const TEMPERATURE = 0.1;
 const MAX_TOKENS  = 256;
 const TIMEOUT_MS  = 5_000;
@@ -206,6 +206,11 @@ export async function extractIntent(
 
       // Don't retry AppErrors (whitelist miss, injection, timeout) — propagate immediately
       if (isAppError) throw err;
+
+      // Surface rate-limit / quota errors immediately with a clear message
+      if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('quota')) {
+        throw new AppError(429, 'RATE_LIMITED', 'AI quota exceeded. Please wait a moment and try again.');
+      }
 
       // Only retry JSON parse errors; if on last attempt, fall through to throw
       if (attempt >= 2) {

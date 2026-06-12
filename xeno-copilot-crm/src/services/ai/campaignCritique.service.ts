@@ -11,7 +11,7 @@
  *     CR-005  At least one message differs per cluster       MEDIUM
  *     CR-006  No fabricated discount codes                   HIGH
  *
- *   Layer 2 — AI tone review (gemini-1.5-flash):
+ *   Layer 2 — AI tone review (gemini-2.5-flash-lite):
  *     Applied after Layer 1 passes.
  *     Post-critique regression check re-runs Layer 1.
  *     If regression detected, pre-critique version is restored.
@@ -136,7 +136,7 @@ function runDeterministicRules(
 
 // ─── Layer 2 — AI tone review ─────────────────────────────────────────────────
 
-const MODEL       = 'gemini-1.5-flash' as const;
+const MODEL       = 'gemini-2.5-flash-lite' as const;
 const TEMPERATURE = 0.3;
 const MAX_TOKENS  = 1024;
 const TIMEOUT_MS  = 6_000;
